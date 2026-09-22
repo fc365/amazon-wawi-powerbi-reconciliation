@@ -898,4 +898,306 @@ This leads to a more defensible analytical result than silently modifying one so
 
 > **The goal of revenue reconciliation is not to manufacture identical numbers. It is to understand and communicate why the numbers differ.**
 
+---
 
+## Power BI Date & Filter Context
+
+One of the most important technical lessons in this project was that a DAX measure can be mathematically correct and still return the wrong business result.
+
+The reason is often not the calculation itself.
+
+The reason is **filter context**.
+
+### 1. The Same Measure Can Behave Differently
+
+Different report pages may use different date fields or slicers.
+
+For example:
+
+```text
+Management Page
+      │
+      ▼
+Calendar[Date]
+      │
+      ▼
+ERP Measures
+
+
+Amazon Analysis Page
+      │
+      ▼
+MarketplaceReport[Period]
+      │
+      ▼
+Amazon Measures
+```
+
+A measure designed for the first page may not automatically receive the intended date filter when reused on the second page.
+
+This can produce a result that looks like a source-data problem even though the real problem is the Power BI filter context.
+
+> **A correct DAX formula in the wrong filter context can produce the wrong business result.**
+
+---
+
+### 2. Identify the Business Date First
+
+Before writing a time-based measure, determine which date represents the business event being analyzed.
+
+Possible dates include:
+
+- purchase date
+- ERP creation date
+- payment date
+- shipping date
+- invoice date
+- refund date
+- settlement transaction date
+
+These dates should not be used interchangeably.
+
+For example:
+
+```text
+Order Analysis      → Purchase Date
+ERP Operations      → Creation Date
+Shipping Analysis   → Shipping Date
+Settlement Analysis → Transaction Date
+```
+
+The correct choice depends on the analytical question.
+
+---
+
+### 3. A Calendar Table Does Not Solve Everything Automatically
+
+A dedicated date dimension is an important part of a robust Power BI model.
+
+However, simply creating a calendar table does not guarantee that every source receives the intended date filter.
+
+Problems can still occur when:
+
+- a fact table has multiple date columns
+- a relationship is inactive
+- another page uses a source-specific date field
+- a measure removes filters with `ALL`
+- a disconnected table controls the report
+- filter propagation does not reach the required table
+
+Therefore, the filter path must still be understood.
+
+---
+
+### 4. Inspect the Active Filter Context
+
+When a KPI produces an unexpected result, the first debugging question should be:
+
+> **Which table and column are actually filtering this visual?**
+
+This should be checked before rewriting the measure.
+
+Useful questions include:
+
+- Which field is used in the date slicer?
+- Which table contains that field?
+- Is there an active relationship?
+- Which direction does the relationship filter?
+- Is the target fact table connected?
+- Does the measure remove existing filters?
+- Is another visual or page filter active?
+
+This simple check can prevent unnecessary changes to otherwise correct DAX logic.
+
+---
+
+### 5. Explicitly Transfer the Selected Period When Necessary
+
+In some reconciliation scenarios, the selected reporting period needs to be applied explicitly to another source.
+
+A simplified pattern is:
+
+```DAX
+VAR StartDate =
+    MIN(Calendar[Date])
+
+VAR EndDate =
+    MAX(Calendar[Date])
+
+RETURN
+CALCULATE(
+    [Order Count],
+    FILTER(
+        ALL(AmazonOrders[PurchaseDate]),
+        AmazonOrders[PurchaseDate] >= StartDate
+            &&
+        AmazonOrders[PurchaseDate] < EndDate + 1
+    )
+)
+```
+
+This pattern makes the intended period explicit.
+
+The `< EndDate + 1` pattern is particularly useful when the source column contains a date-time value rather than a pure date.
+
+It includes records throughout the final selected day without requiring the time component to be removed first.
+
+---
+
+### 6. Different Pages May Require Different Date Sources
+
+During reconciliation, one report page may be controlled by a central calendar while another analytical page may use the reporting period from a source-specific dataset.
+
+In that situation, blindly reusing the same measure can produce incorrect results.
+
+Conceptually:
+
+```DAX
+-- Management page
+VAR StartDate =
+    MIN(Calendar[Date])
+
+VAR EndDate =
+    MAX(Calendar[Date])
+```
+
+while another page may require:
+
+```DAX
+-- Source comparison page
+VAR StartDate =
+    MIN(MonthlyReport[DateFrom])
+
+VAR EndDate =
+    MAX(MonthlyReport[DateTo])
+```
+
+The calculation being performed may be identical.
+
+The difference is **where the selected period comes from**.
+
+This was an important debugging lesson:
+
+> **Before changing a calculation, verify whether the measure is reading the correct filter context.**
+
+---
+
+### 7. Use TREATAS for Controlled Cross-Table Filtering
+
+Date context was not the only filter-context challenge.
+
+After determining the valid Amazon order population, those Order IDs needed to filter the corresponding ERP records.
+
+A controlled pattern was:
+
+```DAX
+VAR ValidOrders =
+    CALCULATETABLE(
+        VALUES(AmazonOrders[OrderID]),
+        AmazonOrders[OrderStatus] <> "Canceled"
+    )
+
+RETURN
+CALCULATE(
+    [ERP Net Revenue],
+    TREATAS(
+        ValidOrders,
+        ERPOrders[ExternalOrderID]
+    )
+)
+```
+
+`TREATAS` allows values from one table to be applied as a filter to another column without creating an additional physical relationship.
+
+This can be useful for reconciliation models, but only after validating:
+
+- identifier compatibility
+- data grain
+- duplicate behavior
+- intended filter direction
+- business definition
+
+---
+
+### 8. Debug Context Before Debugging Arithmetic
+
+When a KPI is unexpectedly high, low, blank, or inconsistent across pages, a useful troubleshooting sequence is:
+
+```text
+Unexpected KPI
+      │
+      ▼
+Check Slicer / Page Filters
+      │
+      ▼
+Identify Date Source
+      │
+      ▼
+Check Relationships
+      │
+      ▼
+Check Filter Propagation
+      │
+      ▼
+Check Measure Context
+      │
+      ▼
+Only Then Check Arithmetic
+```
+
+This order matters.
+
+Changing arithmetic before understanding context can create additional errors while hiding the original problem.
+
+---
+
+### 9. Build Small Control Measures
+
+Complex reconciliation measures should be validated using smaller control measures.
+
+Examples include:
+
+```DAX
+Control Order Count =
+DISTINCTCOUNT(AmazonOrders[OrderID])
+```
+
+or:
+
+```DAX
+Control Revenue =
+SUM(ERPOrderLines[NetRevenue])
+```
+
+These simple measures help answer one question at a time.
+
+For example:
+
+- Is the period correct?
+- Is the order population correct?
+- Are cancellations excluded?
+- Is the marketplace filter working?
+- Does the Order ID transfer work?
+
+Once each component is validated, the final KPI becomes easier to trust and maintain.
+
+---
+
+### 10. General Debugging Principle
+
+A useful rule from this project is:
+
+> **Do not immediately rewrite a measure because the result looks wrong. First determine which data and filters the measure is actually seeing.**
+
+For reconciliation work, DAX debugging is not only about formulas.
+
+It is also about understanding:
+
+- evaluation context
+- relationships
+- filter propagation
+- date semantics
+- data grain
+- business definitions
+
+This distinction can turn what appears to be a complicated calculation problem into a much simpler model or filter-context problem.
