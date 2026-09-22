@@ -20,6 +20,15 @@ Rather than forcing the systems to produce identical numbers, the objective beca
 
 > **Note:** All company-sensitive information, customer information, order IDs, internal system details, and financial values used in the public version of this project are anonymized or replaced with synthetic examples.
 
+ ## Documentation
+- [Data Sources](docs/data-sources.md)
+- [Data Architecture](docs/data-architecture.md)
+- [Order Reconciliation](docs/order-reconciliation.md)
+- [Revenue Reconciliation](docs/revenue-reconciliation.md)
+- [Power Query Validation Patterns](power-query/validation-patterns.md)
+- [DAX Measures](dax/)
+- [Sample Data](sample-data/)
+- [Lessons Learned](docs/lessons-learned.md)
 ---
 
 ## The Business Problem
