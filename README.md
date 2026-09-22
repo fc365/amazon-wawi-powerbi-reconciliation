@@ -313,5 +313,283 @@ Before creating a relationship or cross-source measure, verify:
 
 > **A technically valid Power BI relationship is not automatically a correct business relationship.**
 
+---
+
+## Order Reconciliation Methodology
+
+Comparing order totals across multiple systems requires more than placing two KPIs next to each other.
+
+In this project, the reconciliation was performed step by step. Each step reduced the number of possible causes before individual discrepancies were investigated.
+
+The general workflow was:
+
+```text
+Total Orders
+     │
+     ▼
+Reporting Period
+     │
+     ▼
+Order Status
+     │
+     ▼
+Distinct Order IDs
+     │
+     ▼
+Marketplace
+     │
+     ▼
+Order ID Matching
+     │
+     ▼
+Settlement Timing
+     │
+     ▼
+Identifier Variations
+     │
+     ▼
+Residual Differences
+     │
+     ▼
+Manual Validation
+```
+
+### 1. Define the Reporting Period
+
+The first step was to make sure that the compared datasets referred to the intended reporting period.
+
+This sounds simple, but several different dates existed across the systems:
+
+- purchase date
+- ERP creation date
+- payment date
+- shipping date
+- settlement transaction date
+
+These dates describe different business events.
+
+For operational Amazon order analysis, the purchase date was the relevant date. For settlement analysis, however, the settlement transaction date represented a different process.
+
+Therefore, records were not classified as missing simply because they appeared outside the original purchase month.
+
+---
+
+### 2. Define What Counts as an Order
+
+The next step was to define the order population before comparing totals.
+
+For example, the operational Amazon dataset contained both shipped and cancelled orders.
+
+A simplified Power BI pattern was:
+
+```DAX
+Amazon Orders =
+CALCULATE(
+    DISTINCTCOUNT(AmazonOrders[OrderID]),
+    AmazonOrders[OrderStatus] <> "Canceled"
+)
+```
+
+The important point is not the exact DAX syntax.
+
+The important point is that the business definition must be explicit.
+
+Two systems can both display a metric called **Orders** while applying different status rules internally.
+
+---
+
+### 3. Count Distinct Order IDs
+
+Row counts were not automatically treated as order counts.
+
+Before comparing systems, the analysis checked:
+
+- total rows
+- distinct Order IDs
+- duplicate Order IDs
+- blank identifiers
+- repeated identifiers
+- transaction-level duplicates
+
+This was particularly important for settlement data because one customer order can generate multiple financial transaction rows.
+
+Therefore:
+
+> **Row count ≠ Order count**
+
+A `DISTINCTCOUNT` of a validated business identifier is often more meaningful than counting physical rows.
+
+---
+
+### 4. Validate the Marketplace
+
+Orders were then separated by marketplace.
+
+One important finding was that the shipping country could not safely be used as the marketplace identifier.
+
+For example, an order shipped to Germany does not automatically prove that the order originated from the German Amazon marketplace.
+
+The dedicated sales-channel or marketplace field was therefore used instead.
+
+A marketplace validation should check fields such as:
+
+- sales channel
+- marketplace
+- shipping country
+- billing country
+- currency
+
+These fields describe different concepts and should not be treated as interchangeable.
+
+---
+
+### 5. Match Orders by Business Identifier
+
+After period, status, and marketplace were aligned, individual Order IDs could be compared.
+
+A reconciliation table can conceptually classify records as:
+
+```text
+Order ID        ERP/WaWi        Settlement        Match Status
+---------------------------------------------------------------
+ORDER-001       Found           Found             Matched
+ORDER-002       Found           Not Found         Investigate
+ORDER-003       Not Found       Found             Investigate
+```
+
+The purpose of this step is not immediately to label unmatched records as errors.
+
+An unmatched Order ID only means:
+
+> **The identifier was not found under the current matching rules and available data.**
+
+The reason still needs to be investigated.
+
+---
+
+### 6. Check Settlement Timing
+
+A major source of apparent differences was timing.
+
+An order purchased near the end of one month may generate settlement transactions in the following month.
+
+Therefore, matching only:
+
+```text
+Purchase Month = Settlement Month
+```
+
+can incorrectly classify valid orders as missing.
+
+The analysis therefore searched settlement data beyond the original purchase month before classifying an order as a residual discrepancy.
+
+This leads to an important reconciliation rule:
+
+> **Always distinguish event date from accounting or settlement date.**
+
+---
+
+### 7. Investigate Identifier Variations
+
+Some transaction identifiers contained additional suffixes or variations.
+
+A simplified example:
+
+```text
+123-1234567-1234567
+123-1234567-1234567_1
+123-1234567-1234567_2
+```
+
+These patterns may indicate split transactions, partial processes, or source-specific identifier logic.
+
+For analysis, normalized identifiers can help discover relationships between records.
+
+However, normalization should not automatically become production logic.
+
+Before removing suffixes permanently, it should be confirmed that the suffix does not represent a meaningful business distinction.
+
+> **Useful analytical normalization is not automatically a valid production rule.**
+
+---
+
+### 8. Reduce the Problem Before Manual Investigation
+
+Manual investigation should happen only after automated checks have reduced the discrepancy population.
+
+Instead of manually reviewing thousands of orders, the process progressively reduced the dataset using:
+
+- date validation
+- status filtering
+- distinct Order IDs
+- marketplace filtering
+- exact ID matching
+- settlement-period expansion
+- identifier analysis
+
+Only the remaining unexplained records were investigated individually.
+
+This makes reconciliation more efficient and creates a reproducible analytical process.
+
+---
+
+### 9. Validate Residual Cases Individually
+
+Remaining records were checked against available operational information.
+
+Useful validation fields can include:
+
+- Order ID
+- order status
+- cancellation timestamp
+- payment status
+- purchase date
+- creation date
+- shipping date
+- marketplace
+- shipping country
+- gross value
+- net value
+
+This step can distinguish between cases such as:
+
+- cancelled orders
+- delayed settlement transactions
+- marketplace mismatches
+- identifier differences
+- genuinely unresolved records
+
+A single validated order should only be treated as evidence for that specific case unless the same pattern is demonstrated across the wider population.
+
+> **One matching example does not prove that the entire dataset is correct.**
+
+---
+
+### 10. Keep Unresolved Differences Visible
+
+Not every discrepancy can always be fully explained with the available data.
+
+In this project, a small residual population remained after the systematic reconciliation steps.
+
+Those records were not silently removed and no arbitrary correction factor was applied.
+
+They were documented as unresolved differences requiring further source-system or business validation.
+
+This is an important data-quality principle:
+
+> **An unexplained difference should remain visible until there is evidence explaining it.**
+
+The objective of reconciliation is not to force two systems to match.
+
+The objective is to determine which differences are:
+
+- explained by business definitions
+- explained by timing
+- explained by status
+- explained by marketplace
+- explained by identifier structure
+- caused by transformation or model logic
+- still unresolved
+
 
 
