@@ -1,0 +1,5 @@
+Month,Source,Orders,NetRevenue,Currency,Definition
+2026-02,Synthetic Marketplace Report,15,1438.00,EUR,All marketplace orders including canceled orders
+2026-02,Synthetic ERP Valid Orders,13,1333.00,EUR,Distinct non-canceled operational orders
+2026-02,Synthetic Settlement,12,1300.00,EUR,Order transactions settled during purchase month
+2026-03,Synthetic Settlement Timing,1,58.00,EUR,February order settled in following month
