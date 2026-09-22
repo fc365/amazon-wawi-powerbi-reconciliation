@@ -591,5 +591,311 @@ The objective is to determine which differences are:
 - caused by transformation or model logic
 - still unresolved
 
+---
+
+## Revenue Reconciliation Methodology
+
+Reconciling revenue across e-commerce systems is more complex than comparing two totals.
+
+Different systems can report different financial values for the same business activity while all calculations are technically correct.
+
+The first question should therefore not be:
+
+> **Why are the numbers different?**
+
+The first question should be:
+
+> **Are we actually comparing the same financial concept?**
+
+### 1. Define the Revenue Metric
+
+Several financial metrics can exist for the same order:
+
+- gross sales
+- net sales
+- VAT
+- shipping revenue
+- promotional discounts
+- refunds
+- marketplace fees
+- fulfilment fees
+- settlement amount
+- estimated payout
+- profit
+
+These values should not be treated as interchangeable.
+
+A useful conceptual distinction is:
+
+```text
+Gross Revenue
+      │
+      ├── VAT
+      ▼
+Net Revenue
+      │
+      ├── Refunds / Adjustments
+      ├── Marketplace Fees
+      ├── Fulfilment Fees
+      └── Other Transactions
+      ▼
+Settlement / Payout
+```
+
+The exact calculation depends on the source system and accounting definition.
+
+Therefore:
+
+> **Revenue ≠ Settlement ≠ Payout ≠ Profit**
+
+---
+
+### 2. Understand the Source Definition
+
+Before building a Power BI measure, each source field should be understood independently.
+
+For example, a monthly reporting source may contain separate values for:
+
+- organic sales
+- advertising-attributed sales
+- VAT
+- refunds
+- fees
+- shipping costs
+- estimated payout
+
+A simplified reporting measure may combine sales components:
+
+```DAX
+Gross Sales =
+SUM(MonthlyReport[OrganicSales])
+    + SUM(MonthlyReport[PPCSales])
+```
+
+If VAT is stored separately as a negative value, a net-like analytical measure may use:
+
+```DAX
+Net Sales =
+SUM(MonthlyReport[OrganicSales])
+    + SUM(MonthlyReport[PPCSales])
+    + SUM(MonthlyReport[VAT])
+```
+
+This formula is source-specific.
+
+It should only be used after confirming how VAT and the sales fields are represented in the actual export.
+
+> **Never copy a revenue formula without validating the source semantics first.**
+
+---
+
+### 3. Compare Equivalent Financial Concepts
+
+One of the easiest reconciliation mistakes is comparing values that look similar but represent different concepts.
+
+Examples of invalid comparisons include:
+
+```text
+ERP Net Revenue      vs. Marketplace Payout
+Gross Order Value    vs. Net Revenue
+Sales Revenue        vs. Settlement Total
+Purchase-Month Sales vs. Settlement-Month Transactions
+```
+
+A better comparison is:
+
+```text
+Source A Net Revenue
+        vs.
+Source B Net Revenue
+```
+
+with aligned:
+
+- order population
+- marketplace
+- reporting period
+- cancellation logic
+- tax treatment
+- currency
+- revenue components
+
+Only then does the remaining difference become analytically meaningful.
+
+---
+
+### 4. Validate Gross and Net Values
+
+When gross and net values are available, VAT can be used as an important plausibility check.
+
+Conceptually:
+
+```text
+Gross Revenue = Net Revenue + VAT
+```
+
+However, real marketplace data can contain additional tax logic, discounts, refunds, shipping components, or marketplace-specific tax treatment.
+
+Therefore, the equation should be treated as a validation concept rather than blindly assumed for every transaction.
+
+At order level, comparing gross and net values can help identify whether two systems are storing:
+
+- the same customer-facing amount
+- tax-inclusive amounts
+- tax-exclusive amounts
+- settlement-adjusted amounts
+
+---
+
+### 5. Separate Revenue from Marketplace Fees
+
+Marketplace fees should not automatically be deducted when the objective is to calculate sales revenue.
+
+Settlement datasets can contain:
+
+- selling fees
+- fulfilment fees
+- transaction fees
+- shipping-related charges
+- other adjustments
+
+These values explain how money moves between the marketplace and the seller.
+
+They do not automatically redefine the original sales revenue.
+
+This distinction is essential when comparing ERP revenue with marketplace financial data.
+
+---
+
+### 6. Treat Refunds Separately
+
+Refunds can create another timing problem.
+
+An order may be purchased in one period and refunded in a later period.
+
+Therefore:
+
+```text
+Purchase Period ≠ Refund Period
+```
+
+A monthly sales comparison can become misleading if one source reports revenue by purchase date while another includes later financial adjustments.
+
+Refund analysis should therefore consider:
+
+- original Order ID
+- original purchase date
+- refund transaction date
+- refunded amount
+- tax adjustment
+- reporting-period definition
+
+---
+
+### 7. Use the Same Order Population
+
+Revenue comparisons are only meaningful when the compared systems refer to the same intended population.
+
+For example, if cancelled orders are excluded from the operational Amazon order KPI, the related ERP revenue measure should use the same validated order population.
+
+A controlled pattern can use a validated list of Order IDs:
+
+```DAX
+VAR ValidOrders =
+    CALCULATETABLE(
+        VALUES(AmazonOrders[OrderID]),
+        AmazonOrders[OrderStatus] <> "Canceled"
+    )
+
+RETURN
+CALCULATE(
+    SUM(ERPOrderLines[NetRevenue]),
+    TREATAS(
+        ValidOrders,
+        ERPOrders[ExternalOrderID]
+    )
+)
+```
+
+This prevents the revenue KPI from silently including a different set of orders than the order-count KPI.
+
+---
+
+### 8. Validate Revenue at Order Level
+
+Aggregate totals alone are not sufficient for diagnosing differences.
+
+Two totals can appear close even when individual records are wrong because positive and negative differences may offset each other.
+
+A stronger reconciliation compares individual orders.
+
+A conceptual reconciliation table could contain:
+
+```text
+Order ID | ERP Gross | ERP Net | Marketplace Gross | Marketplace Net | Difference | Status
+```
+
+Order-level analysis helps distinguish between:
+
+- exact matches
+- tax differences
+- shipping differences
+- discounts
+- refunds
+- cancellations
+- missing transactions
+- timing differences
+- unexplained residuals
+
+---
+
+### 9. Do Not Force Exact Equality
+
+A reconciliation project should not introduce an arbitrary correction factor simply because management expects two systems to show the same number.
+
+A difference may result from legitimate differences in:
+
+- business definitions
+- transaction timing
+- source-system processing
+- tax treatment
+- marketplace logic
+- cancellation handling
+- refunds
+- available data
+
+Applying a correction factor without identifying the cause can hide a real data-quality problem.
+
+A better reporting approach is to make the difference transparent.
+
+For example:
+
+```DAX
+Revenue Difference =
+[ERP Net Revenue]
+    - [Marketplace Net Revenue]
+```
+
+The result should be described as a **source difference** until its cause has been demonstrated.
+
+---
+
+### 10. Make Reconciliation Transparent
+
+A professional dashboard does not need every source to produce identical numbers.
+
+Instead, it should make clear:
+
+- which source provides each KPI
+- which business definition is used
+- which date controls the calculation
+- which records are excluded
+- how tax is treated
+- how large the remaining difference is
+- whether that difference has been explained
+
+This leads to a more defensible analytical result than silently modifying one source until the totals match.
+
+> **The goal of revenue reconciliation is not to manufacture identical numbers. It is to understand and communicate why the numbers differ.**
 
 
