@@ -57,3 +57,116 @@ The reconciliation therefore focused on questions such as:
 10. When is a remaining difference a genuine data-quality issue rather than a definitional difference?
 
 These questions became the foundation of the reconciliation methodology used throughout this project.
+## Data Sources & Data Grain
+
+One of the most important lessons from this project was that data sources should not be compared only because they describe the same business process.
+
+The systems used in this analysis represent Amazon activity at different levels of detail and at different points in time.
+
+### 1. Sellerboard
+
+Sellerboard was used as a monthly reporting source for Amazon performance.
+
+The available export contained aggregated metrics such as:
+
+- Orders
+- Organic Sales
+- PPC Sales
+- VAT
+- Refunds
+- Amazon Fees
+- Shipping Costs
+- Estimated Payout
+- Net Profit
+
+**Data grain:** aggregated reporting period / month.
+
+This means that the Sellerboard export could be used for KPI comparison, but not for a direct order-by-order reconciliation because individual Order IDs were not available in the monthly dataset.
+
+---
+
+### 2. ERP / WaWi
+
+The ERP/WaWi system contained detailed operational order information.
+
+Relevant fields included information such as:
+
+- External Order ID
+- Purchase Date
+- Order Creation Date
+- Order Status
+- Cancellation Status
+- Sales Channel
+- Shipping Country
+- Payment Information
+- Order Positions
+- Gross and Net Values
+
+**Data grain:** order and order-line level.
+
+This source allowed individual Amazon orders to be investigated and matched against other transaction-level datasets.
+
+A key lesson was that the shipping country should not automatically be interpreted as the Amazon marketplace. The sales-channel field was required to distinguish marketplaces such as Amazon.de, Amazon.fr, Amazon.it, and others.
+
+---
+
+### 3. Amazon Settlement Data
+
+Amazon settlement files contained financial transactions related to marketplace activity.
+
+Typical fields included:
+
+- Transaction Date
+- Settlement ID
+- Transaction Type
+- Amazon Order ID
+- SKU
+- Quantity
+- Marketplace
+- Product Sales
+- Product VAT
+- Shipping Credits
+- Promotional Discounts
+- Marketplace Withheld Tax
+- Selling Fees
+- Fulfilment Fees
+- Other Transaction Fees
+- Transaction Total
+
+**Data grain:** financial transaction / settlement-line level.
+
+This is fundamentally different from an ERP order table.
+
+One customer order may generate multiple financial transactions, and those transactions may be recorded in a later reporting period than the original purchase.
+
+Therefore:
+
+> Purchase month ≠ Settlement month
+
+This became one of the most important rules of the reconciliation.
+
+---
+
+### Why Data Grain Matters
+
+A direct comparison such as:
+
+`Sellerboard Orders = ERP Rows = Settlement Rows`
+
+would be analytically incorrect.
+
+Before comparing KPIs, each source must first be understood in terms of:
+
+- business definition
+- granularity
+- unique identifier
+- reporting date
+- status logic
+- marketplace
+- currency
+- gross/net treatment
+- tax treatment
+
+Only after these definitions are aligned should differences be interpreted as potential data-quality problems.
+
+This principle prevented several apparent discrepancies from being incorrectly classified as missing orders or missing revenue.
