@@ -1590,3 +1590,849 @@ but:
 > **What exactly does each number represent?**
 
 Once the meaning, population, period, grain, and filter context are understood, many apparent Power BI problems become much easier to diagnose.
+
+---
+
+## Building a Reconciliation Layer
+
+For larger reconciliation projects, debugging differences only through individual Power BI measures becomes difficult to maintain.
+
+A more scalable approach is to create a dedicated **reconciliation layer**.
+
+The purpose of this layer is to bring comparable information from multiple systems together at a controlled analytical grain.
+
+A conceptual order-level reconciliation table could look like this:
+
+```text
+OrderID
+PurchaseDate
+Marketplace
+ERPStatus
+MarketplaceStatus
+ERP_Gross
+ERP_Net
+Marketplace_Gross
+Marketplace_Net
+VAT
+SettlementFound
+AmountDifference
+MatchStatus
+ReasonCode
+```
+
+The exact structure depends on the available source systems.
+
+The important principle is that the table should answer:
+
+> **For this business object, what does each system say?**
+
+### Example Match Status
+
+A useful classification could be:
+
+```text
+MATCHED
+CANCELLED
+SETTLED_LATER
+MARKETPLACE_MISMATCH
+AMOUNT_DIFFERENCE
+IDENTIFIER_VARIATION
+ONLY_IN_ERP
+ONLY_IN_MARKETPLACE
+UNRESOLVED
+```
+
+These categories make discrepancies measurable instead of leaving them hidden inside aggregate totals.
+
+### Example Reason Codes
+
+A separate reason code can provide additional detail:
+
+```text
+C01 = Cancelled order
+D01 = Different reporting period
+I01 = Identifier variation
+M01 = Marketplace mismatch
+R01 = Refund adjustment
+T01 = Settlement timing
+V01 = VAT difference
+A01 = Amount difference
+U01 = Unresolved
+```
+
+This creates an audit trail and makes it possible to report not only **how large** the discrepancy is, but also **why** it exists.
+
+---
+
+## Data Quality Framework
+
+Reconciliation is fundamentally a data-quality problem.
+
+A useful framework is to evaluate the data across several dimensions.
+
+### Completeness
+
+Questions:
+
+- Are expected Order IDs present?
+- Are important fields blank?
+- Are all expected reporting periods available?
+- Are all marketplaces included?
+- Are settlement files complete?
+
+Example control:
+
+```DAX
+Orders Without ID =
+CALCULATE(
+    COUNTROWS(Orders),
+    ISBLANK(Orders[OrderID])
+)
+```
+
+---
+
+### Uniqueness
+
+Questions:
+
+- Is the expected business key unique?
+- Can one Order ID appear multiple times?
+- Are duplicates legitimate order lines or actual duplicate records?
+
+A duplicate should not automatically be deleted.
+
+First determine whether the table grain explains the repetition.
+
+---
+
+### Consistency
+
+Questions:
+
+- Are marketplace names standardized?
+- Are status values consistent?
+- Are currencies represented consistently?
+- Are dates stored using consistent data types?
+- Are Order IDs formatted identically across systems?
+
+Examples of values that may require standardization:
+
+```text
+Amazon DE
+Amazon.de
+amazon.de
+AMAZON.DE
+```
+
+Standardization can improve matching, but the original source value should remain traceable.
+
+---
+
+### Validity
+
+Questions:
+
+- Are dates plausible?
+- Are financial values numeric?
+- Are Order IDs structurally valid?
+- Are status values part of the expected domain?
+- Are marketplace codes recognized?
+
+Validation rules should detect suspicious records rather than silently modify them.
+
+---
+
+### Accuracy
+
+Accuracy asks whether a value correctly represents the real business event.
+
+This is harder to prove automatically.
+
+It may require validation against:
+
+- source-system records
+- invoices
+- payment information
+- shipping information
+- settlement transactions
+- manually verified examples
+
+A technically valid value is not automatically an accurate business value.
+
+---
+
+### Timeliness
+
+Different systems may refresh at different times.
+
+A temporary discrepancy may therefore be caused by:
+
+- delayed API synchronization
+- scheduled imports
+- settlement processing
+- failed refreshes
+- incremental loading
+- late source updates
+
+Refresh timing should be checked before a difference is classified as a data-quality defect.
+
+---
+
+## Power Query Validation Strategy
+
+Power Query should not only be used to clean data.
+
+It can also create transparent validation steps before the data reaches the semantic model.
+
+A robust transformation workflow could follow:
+
+```text
+Raw Source
+    ↓
+Data Types
+    ↓
+Text Standardization
+    ↓
+Identifier Validation
+    ↓
+Date Validation
+    ↓
+Marketplace Standardization
+    ↓
+Duplicate Check
+    ↓
+Business Rule Validation
+    ↓
+Clean Staging Table
+```
+
+### Preserve Raw Data
+
+Whenever possible, keep the raw import logically separate from cleaned tables.
+
+For example:
+
+```text
+stg_AmazonOrders_Raw
+        ↓
+stg_AmazonOrders_Clean
+        ↓
+fact_AmazonOrders
+```
+
+This makes transformations easier to audit.
+
+If a value changes unexpectedly, the analyst can compare the cleaned result with the original source.
+
+### Avoid Silent Data Loss
+
+Operations such as:
+
+- removing errors
+- removing duplicates
+- replacing null values
+- filtering rows
+- changing data types
+
+can remove or modify important records.
+
+Every destructive transformation should therefore have a clear reason.
+
+A good question is:
+
+> **How many records existed before and after this transformation?**
+
+Unexpected row-count changes should be investigated.
+
+---
+
+## Additional Risks to Check
+
+Not every possible reconciliation problem occurred in this project.
+
+However, a professional reconciliation framework should also consider the following risks.
+
+### Time Zones
+
+Marketplace systems, APIs, ERP systems, and settlement exports may use different time zones.
+
+An order created close to midnight could therefore appear on different calendar dates across systems.
+
+Check:
+
+- source time zone
+- UTC conversion
+- daylight-saving changes
+- local ERP time
+- marketplace reporting time
+
+---
+
+### Currency Conversion
+
+International marketplaces may contain multiple currencies.
+
+Before aggregating revenue, verify:
+
+- transaction currency
+- reporting currency
+- exchange-rate source
+- exchange-rate date
+- rounding rules
+
+Never aggregate different currencies as if they were directly comparable.
+
+---
+
+### Refunds in Later Periods
+
+Refunds can occur days or weeks after the original sale.
+
+A purchase-month analysis and a financial-period analysis may therefore legitimately produce different results.
+
+---
+
+### Chargebacks and Adjustments
+
+Financial datasets may contain transactions that are not ordinary sales or refunds.
+
+Examples include:
+
+- chargebacks
+- reimbursement transactions
+- fee corrections
+- tax adjustments
+- marketplace adjustments
+
+Transaction type should therefore be analyzed before financial amounts are aggregated.
+
+---
+
+### Split Shipments
+
+One customer order may create multiple shipments.
+
+Depending on the source system, this may also create:
+
+- multiple transaction rows
+- multiple invoice records
+- suffixed identifiers
+- multiple settlement events
+
+Order grain and shipment grain should not be confused.
+
+---
+
+### Bundle and Multi-Line Orders
+
+One Order ID can contain several products.
+
+Therefore:
+
+```text
+Order Count ≠ Order-Line Count ≠ Unit Count
+```
+
+The correct metric depends on the business question.
+
+---
+
+### API Pagination
+
+When data is loaded from an API, a technically successful request does not guarantee that all records were downloaded.
+
+Always check:
+
+- page size
+- pagination tokens
+- maximum record limits
+- API rate limits
+- failed requests
+
+Missing pagination logic can create silent data loss.
+
+---
+
+### Incremental Loads
+
+Incremental loading can create discrepancies if:
+
+- historical records are modified later
+- refunds affect older orders
+- cancelled orders change status
+- late transactions arrive
+- the refresh window is too short
+
+Historical data may therefore require periodic reprocessing.
+
+---
+
+### Schema Drift
+
+Source systems can change.
+
+Possible changes include:
+
+- renamed columns
+- new status values
+- changed data types
+- additional transaction types
+- removed fields
+
+A pipeline that worked yesterday may still refresh successfully while producing different business results.
+
+Source schemas should therefore be monitored.
+
+---
+
+### Rounding
+
+Small financial differences may be caused by rounding at different grains.
+
+For example:
+
+```text
+Round each order line
+        vs.
+Sum first, then round
+```
+
+can produce slightly different totals.
+
+Rounding rules should be understood before small differences are classified as errors.
+
+---
+
+## Validation Strategy
+
+A KPI should not be considered validated simply because the final number looks plausible.
+
+Validation should happen at several levels.
+
+### Level 1 — Technical Validation
+
+Check:
+
+- data types
+- relationships
+- refresh success
+- syntax
+- filter propagation
+- duplicate keys
+
+### Level 2 — Population Validation
+
+Check:
+
+- reporting period
+- marketplace
+- status
+- distinct Order IDs
+- exclusions
+
+### Level 3 — Financial Validation
+
+Check:
+
+- gross/net definition
+- VAT
+- refunds
+- discounts
+- shipping
+- fees
+- currency
+
+### Level 4 — Record-Level Validation
+
+Select individual cases and compare them across available systems.
+
+### Level 5 — Aggregate Validation
+
+Compare final totals after the underlying population has been validated.
+
+The order matters.
+
+A plausible aggregate total should not replace record-level and population-level validation.
+
+---
+
+## Evidence Levels
+
+During troubleshooting, conclusions should reflect the strength of the available evidence.
+
+A useful internal classification is:
+
+### Confirmed
+
+Supported directly by the relevant data or source-system record.
+
+### Empirically Supported
+
+A pattern is strongly supported by multiple observations but has not been formally confirmed by source-system documentation.
+
+### Hypothesis
+
+A possible explanation that still requires testing.
+
+### Unresolved
+
+The available data is insufficient to determine the cause.
+
+This prevents assumptions from gradually becoming treated as facts.
+
+---
+
+## Example Reconciliation Workflow
+
+A reusable workflow for future projects is:
+
+```text
+1. Define the business question
+              ↓
+2. Identify all source systems
+              ↓
+3. Determine the grain of each source
+              ↓
+4. Identify business keys
+              ↓
+5. Define the reporting period
+              ↓
+6. Define status rules
+              ↓
+7. Align marketplace / channel
+              ↓
+8. Align financial definitions
+              ↓
+9. Compare distinct business objects
+              ↓
+10. Match individual records
+              ↓
+11. Investigate unmatched records
+              ↓
+12. Validate amounts
+              ↓
+13. Classify remaining differences
+              ↓
+14. Build transparent KPIs
+              ↓
+15. Document unresolved cases
+```
+
+This workflow is more reliable than starting with a complex DAX formula and trying to adjust it until the totals look correct.
+
+---
+
+## Recommended Reconciliation Output
+
+Instead of showing only one final KPI, a reconciliation dashboard can expose the comparison transparently.
+
+Useful metrics include:
+
+```text
+Source A Orders
+Source B Orders
+Order Difference
+
+Source A Net Revenue
+Source B Net Revenue
+Revenue Difference
+
+Matched Orders
+Unmatched Orders
+Cancelled Orders
+Timing Differences
+Unresolved Records
+```
+
+This allows users to distinguish operational KPIs from data-quality KPIs.
+
+A management dashboard can remain simple while a separate analytical page provides the reconciliation details.
+
+---
+
+## Documentation & Auditability
+
+Reconciliation logic should be understandable by someone who did not build the original report.
+
+Important documentation should include:
+
+- source name
+- source grain
+- business key
+- date definition
+- marketplace definition
+- order-status logic
+- revenue definition
+- tax treatment
+- exclusions
+- transformations
+- DAX logic
+- known limitations
+- unresolved differences
+
+Measure names should also describe their purpose clearly.
+
+For example:
+
+```text
+Orders
+Net Revenue
+Order Difference
+Revenue Difference
+Unresolved Orders
+```
+
+Technical complexity should not force business users to understand the implementation details.
+
+---
+
+## What Did Not Work
+
+Documenting failed approaches is valuable because they explain why the final solution exists.
+
+### Comparing Totals Too Early
+
+Starting with aggregate totals created several apparent discrepancies without explaining their cause.
+
+**Better approach:** validate population and grain first.
+
+### Treating Every Difference as Missing Data
+
+A numerical difference was initially tempting to interpret as missing records.
+
+**Better approach:** call it a source difference until the cause is proven.
+
+### Comparing Purchase Month Directly with Settlement Month
+
+This produced false unmatched cases because financial transactions can be recorded later.
+
+**Better approach:** search across appropriate settlement periods.
+
+### Using Shipping Country as Marketplace
+
+Destination country and marketplace are different dimensions.
+
+**Better approach:** use the dedicated sales-channel or marketplace field.
+
+### Reusing Measures Across Different Page Contexts
+
+A measure that worked on one page could return an incorrect value on another page because the selected period came from a different table.
+
+**Better approach:** inspect filter context before modifying arithmetic.
+
+### Treating Payout as Revenue
+
+Marketplace payout includes financial effects beyond sales revenue.
+
+**Better approach:** identify comparable financial concepts before calculating differences.
+
+### Normalizing Identifiers Too Early
+
+Removing suffixes improved exploratory matching but could not automatically be treated as a valid production rule.
+
+**Better approach:** use normalization for investigation first and require business evidence before permanent implementation.
+
+### Trying to Force Exact Equality
+
+A correction factor can hide genuine source differences.
+
+**Better approach:** quantify and explain the difference transparently.
+
+---
+
+## Lessons Learned
+
+This project changed the way I approach Power BI reconciliation work.
+
+The biggest lesson was that dashboard development is not mainly about creating visuals or writing DAX.
+
+The difficult part is understanding what the data actually represents.
+
+### 1. Business Definitions Come Before DAX
+
+Before calculating a KPI, define:
+
+- what is being counted
+- which records belong to the population
+- which date applies
+- which statuses are valid
+- which marketplace is relevant
+- which financial definition is required
+
+### 2. Data Grain Must Be Understood First
+
+An order table, an order-line table, a monthly KPI export, and a settlement transaction table cannot be compared directly.
+
+### 3. Differences Are Evidence, Not Conclusions
+
+A discrepancy tells the analyst where to investigate.
+
+It does not explain the cause by itself.
+
+### 4. Filter Context Is Part of the Business Logic
+
+Power BI context is not only a technical DAX concept.
+
+If the wrong date or filter reaches a measure, the business meaning of the KPI changes.
+
+### 5. Small Control Measures Are Powerful
+
+Simple control measures often provide more diagnostic value than immediately building one large complex measure.
+
+### 6. Manual Validation Still Matters
+
+Automated matching can reduce thousands of records to a small residual population.
+
+Those remaining cases may still require source-system investigation.
+
+### 7. Unresolved Is a Valid Analytical Result
+
+An analyst should not invent an explanation when the available evidence is insufficient.
+
+Documenting a small unresolved residual is more professional than forcing the numbers to match.
+
+### 8. Reproducibility Matters
+
+Another analyst should be able to understand:
+
+- what was tested
+- why it was tested
+- what evidence was found
+- what was changed
+- what remains uncertain
+
+This turns troubleshooting into an analytical process rather than trial and error.
+
+---
+
+## What I Would Improve in a Future Version
+
+If this solution were developed further, I would move more reconciliation logic out of individual report measures and into a reusable reconciliation layer.
+
+Potential improvements include:
+
+- dedicated order-level reconciliation table
+- automated match-status classification
+- standardized reason codes
+- automated data-quality tests
+- refresh monitoring
+- source row-count monitoring
+- duplicate detection
+- marketplace validation
+- currency normalization
+- historical reconciliation snapshots
+- documented KPI definitions
+- automated alerts for unusual source differences
+
+This would make the solution easier to maintain, audit, and scale.
+
+---
+
+## Suggested Repository Structure
+
+As the project grows, documentation and examples can be separated from the main README.
+
+```text
+amazon-wawi-powerbi-reconciliation/
+│
+├── README.md
+│
+├── docs/
+│   ├── data-sources.md
+│   ├── data-architecture.md
+│   ├── order-reconciliation.md
+│   ├── revenue-reconciliation.md
+│   ├── dax-filter-context.md
+│   ├── troubleshooting.md
+│   └── lessons-learned.md
+│
+├── dax/
+│   ├── order-measures.md
+│   ├── revenue-measures.md
+│   └── reconciliation-measures.md
+│
+├── power-query/
+│   └── validation-patterns.md
+│
+├── sample-data/
+│   ├── orders.csv
+│   ├── settlement.csv
+│   └── monthly-kpis.csv
+│
+└── images/
+    └── architecture.png
+```
+
+The public repository should contain only anonymized or synthetic data.
+
+No customer information, real Order IDs, internal server details, credentials, or confidential company information should be published.
+
+---
+
+## Skills Demonstrated
+
+This case study demonstrates practical experience with:
+
+- Power BI
+- DAX
+- Power Query
+- data modeling
+- data reconciliation
+- data quality analysis
+- root-cause analysis
+- filter-context debugging
+- ERP/WaWi data
+- marketplace data
+- financial transaction data
+- KPI definition
+- validation methodology
+- technical documentation
+
+The project also demonstrates an important analytical skill:
+
+> **Knowing when the available evidence is sufficient to make a conclusion — and when it is not.**
+
+---
+
+## Final Takeaway
+
+A reconciliation project should not begin with the assumption that one system is correct and another system is wrong.
+
+Different systems often represent different stages of the same business process.
+
+A marketplace reporting tool may describe commercial performance.
+
+An ERP system may describe operational orders and accounting values.
+
+A settlement system may describe financial transactions and payouts.
+
+Power BI then adds another layer where relationships, filters, date context, and DAX determine how those sources are interpreted.
+
+The analyst's job is therefore not simply to make the numbers equal.
+
+It is to create a traceable path from:
+
+```text
+Source Data
+    ↓
+Business Definition
+    ↓
+Data Grain
+    ↓
+Transformation
+    ↓
+Data Model
+    ↓
+Filter Context
+    ↓
+KPI
+    ↓
+Validation
+    ↓
+Business Interpretation
+```
+
+When every step is understood and documented, differences between systems become explainable, measurable, and manageable.
+
+> **Good reconciliation does not hide uncertainty. It makes uncertainty visible, testable, and understandable.**
