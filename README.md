@@ -1201,3 +1201,392 @@ It is also about understanding:
 - business definitions
 
 This distinction can turn what appears to be a complicated calculation problem into a much simpler model or filter-context problem.
+
+---
+
+## Common Reconciliation Mistakes & Troubleshooting
+
+Many reconciliation problems are not caused by complex mathematics.
+
+They are caused by comparing the wrong populations, dates, identifiers, or financial definitions.
+
+The following mistakes were especially important during this project and are useful checks for similar Power BI reconciliation tasks.
+
+### 1. Difference Does Not Automatically Mean Missing Data
+
+A difference between two systems should not immediately be described as missing orders or missing revenue.
+
+For example:
+
+```text
+System A Orders = 1,000
+System B Orders =   970
+Difference       =    30
+```
+
+This proves only that the systems differ by 30 under the current definitions.
+
+It does not prove that 30 orders are missing.
+
+Possible explanations include:
+
+- cancelled orders
+- different reporting periods
+- different marketplaces
+- settlement timing
+- duplicate or split transactions
+- different order definitions
+- source refresh timing
+- identifier differences
+
+Therefore, a safer term during investigation is:
+
+> **Source difference**
+
+The cause should only be assigned after it has been demonstrated.
+
+---
+
+### 2. Do Not Use Row Count as Order Count
+
+Transaction-level datasets may contain several rows for one business order.
+
+Therefore:
+
+```text
+COUNTROWS(TransactionTable)
+```
+
+and:
+
+```text
+DISTINCTCOUNT(TransactionTable[OrderID])
+```
+
+can answer completely different questions.
+
+Before counting orders, verify the grain of the table and the uniqueness of the identifier.
+
+> **One row is not automatically one order.**
+
+---
+
+### 3. Do Not Assume Identical KPI Names Mean Identical Definitions
+
+Two systems may both contain a KPI called **Orders**, **Revenue**, or **Sales** while using different underlying definitions.
+
+Possible differences include:
+
+- cancelled orders included or excluded
+- purchase date vs. creation date
+- gross vs. net revenue
+- VAT included or excluded
+- refunds included or excluded
+- marketplace fees included or excluded
+
+Always document the business definition behind a KPI before comparing it.
+
+---
+
+### 4. Shipping Country Is Not Marketplace
+
+Shipping destination and sales channel describe different concepts.
+
+For example:
+
+```text
+Marketplace:      Amazon.de
+Shipping Country: France
+```
+
+or:
+
+```text
+Marketplace:      Amazon.fr
+Shipping Country: Germany
+```
+
+may both be valid scenarios.
+
+Marketplace analysis should therefore use the dedicated marketplace or sales-channel field whenever available.
+
+> **Destination does not prove origin.**
+
+---
+
+### 5. Purchase Month Is Not Settlement Month
+
+Marketplace settlement transactions can occur after the original purchase.
+
+Therefore, searching only the purchase month in settlement data can create false unmatched records.
+
+A better workflow is:
+
+```text
+Purchase Month
+      │
+      ▼
+Search Same Settlement Period
+      │
+      ▼
+Search Later Settlement Periods
+      │
+      ▼
+Only Then Classify Residual Cases
+```
+
+This is especially important for orders created near the end of a month.
+
+---
+
+### 6. Payout Is Not Revenue
+
+Marketplace financial exports may contain values such as:
+
+- sales
+- VAT
+- refunds
+- fees
+- fulfilment costs
+- other adjustments
+- settlement total
+- payout
+
+These values describe different financial concepts.
+
+Comparing an ERP sales KPI directly with a marketplace payout can create a large apparent discrepancy even when both systems are correct.
+
+> **Revenue ≠ Settlement ≠ Payout ≠ Profit**
+
+---
+
+### 7. Do Not Normalize Order IDs Without Evidence
+
+Identifier variations such as:
+
+```text
+ORDER-123
+ORDER-123_1
+ORDER-123_2
+```
+
+may reveal relationships between transactions.
+
+Removing suffixes can be useful during exploratory analysis.
+
+However, it should not automatically become permanent transformation logic.
+
+The suffix may represent:
+
+- split transactions
+- partial shipments
+- adjustments
+- source-specific transaction logic
+- another meaningful business event
+
+Normalization should only become production logic after its meaning has been validated.
+
+---
+
+### 8. Check Filter Context Before Rewriting DAX
+
+When a measure returns an unexpected result, rewriting the formula should not be the first reaction.
+
+First check:
+
+- active slicers
+- page filters
+- visual filters
+- date source
+- relationships
+- filter direction
+- inactive relationships
+- `ALL` or other filter-removal logic
+
+A measure can be mathematically correct but receive the wrong filter context.
+
+A useful debugging sequence is:
+
+```text
+Wrong KPI
+   │
+   ▼
+Check Filters
+   │
+   ▼
+Check Date Context
+   │
+   ▼
+Check Relationships
+   │
+   ▼
+Check Population
+   │
+   ▼
+Check DAX
+   │
+   ▼
+Check Source Data
+```
+
+---
+
+### 9. Do Not Trust Aggregate Totals Alone
+
+Two totals can match while individual records are incorrect.
+
+For example:
+
+```text
+Order A Difference: +50
+Order B Difference: -50
+Total Difference:     0
+```
+
+The aggregate appears perfect, but two order-level discrepancies still exist.
+
+For important reconciliations, validate both:
+
+- aggregate totals
+- individual records
+
+---
+
+### 10. One Successful Test Case Does Not Validate the Whole Dataset
+
+Finding one order that matches perfectly is useful evidence.
+
+It does not prove that every order follows the same pattern.
+
+A test result should therefore be described precisely:
+
+> **This test case confirms the logic for this record.**
+
+A wider conclusion requires validation across a sufficiently representative population.
+
+---
+
+### 11. Do Not Hide Differences with a Correction Factor
+
+A correction factor may make two KPI totals visually identical without explaining the underlying discrepancy.
+
+This can hide:
+
+- missing transactions
+- wrong filters
+- incorrect status logic
+- tax differences
+- marketplace problems
+- source-system issues
+
+Correction logic should only be used when there is a documented and defensible business rule behind it.
+
+It should not be used simply to force equality.
+
+---
+
+### 12. Do Not Mix Debugging Questions
+
+Trying several changes simultaneously makes it difficult to determine which change actually solved the problem.
+
+A better approach is:
+
+```text
+Question
+   │
+   ▼
+One Hypothesis
+   │
+   ▼
+One Targeted Test
+   │
+   ▼
+Evaluate Result
+   │
+   ▼
+Next Question
+```
+
+This creates a traceable analytical process and reduces trial-and-error debugging.
+
+---
+
+## Troubleshooting Decision Tree
+
+When **order counts do not match**, check in this order:
+
+```text
+Reporting Period
+      ↓
+Business Definition
+      ↓
+Order Status
+      ↓
+Distinct Order ID
+      ↓
+Marketplace
+      ↓
+Identifier Matching
+      ↓
+Settlement Timing
+      ↓
+Residual Cases
+```
+
+When **revenue does not match**, check:
+
+```text
+Order Population
+      ↓
+Gross vs. Net
+      ↓
+VAT Treatment
+      ↓
+Marketplace
+      ↓
+Reporting Period
+      ↓
+Cancellations
+      ↓
+Refunds / Discounts
+      ↓
+Shipping Components
+      ↓
+Order-Level Amounts
+      ↓
+Residual Difference
+```
+
+When a **Power BI measure looks wrong**, check:
+
+```text
+Slicer / Page Filters
+      ↓
+Date Source
+      ↓
+Relationships
+      ↓
+Filter Propagation
+      ↓
+Data Grain
+      ↓
+Business Population
+      ↓
+DAX Logic
+      ↓
+Source Data
+```
+
+---
+
+### Final Troubleshooting Principle
+
+The most useful question during reconciliation is often not:
+
+> **How can I make these numbers match?**
+
+but:
+
+> **What exactly does each number represent?**
+
+Once the meaning, population, period, grain, and filter context are understood, many apparent Power BI problems become much easier to diagnose.
